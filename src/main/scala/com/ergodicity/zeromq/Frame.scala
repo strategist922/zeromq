@@ -39,9 +39,23 @@ object ZMQMessage {
   def apply(bytes: Array[Byte]): ZMQMessage = ZMQMessage(Seq(Frame(bytes)))
 }
 
-/**
- * Deserializes ZeroMQ messages into an immutable sequence of frames
- */
-class ZMQMessageDeserializer extends Deserializer {
-  def apply(frames: Seq[Frame]) = ZMQMessage(frames)
+trait Deserializer[T] {
+  def apply(frames: Seq[Frame]): T
+}
+
+object Deserializer {
+  implicit val ZMQMessageDeserializer = new Deserializer[ZMQMessage] {
+    def apply(frames: Seq[Frame]) = ZMQMessage(frames)
+  }
+}
+
+trait Serializer[T] {
+  def apply(obj: T): Seq[Frame]
+}
+
+
+object Serializer {
+  implicit val StringSerializer = new Serializer[String] {
+    def apply(obj: String) = Seq(Frame(obj))
+  }
 }

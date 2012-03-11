@@ -29,16 +29,18 @@ object SocketType {
 
   object Dealer extends ZMQSocketType(ZMQ.DEALER)
 
+  object Pub extends ZMQSocketType(ZMQ.PUB)
+
   object Sub extends ZMQSocketType(ZMQ.SUB)
+
+  object Rep extends ZMQSocketType(ZMQ.REP)
 }
 
 case class PollTimeoutDuration(duration: Duration = 100.millis) extends SocketMeta
 
-trait Deserializer {
-  def apply(frames: Seq[Frame]): Any
-}
-
 case class Bind(endpoint: String) extends SocketConnectOption
+
+case class Connect(endpoint: String) extends SocketConnectOption
 
 case class Subscribe(payload: Seq[Byte]) extends PubSubOption {
   def this(topic: String) = this(topic.getBytes("UTF-8"))
@@ -53,4 +55,5 @@ case class Unsubscribe(payload: Seq[Byte]) extends PubSubOption {
 }
 object Unsubscribe {
   def apply(topic: String): Unsubscribe = new Unsubscribe(topic)
+  val all = Unsubscribe(Seq.empty)
 }

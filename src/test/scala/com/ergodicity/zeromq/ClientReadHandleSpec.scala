@@ -4,77 +4,52 @@ import org.scalatest.Spec
 import org.zeromq.ZMQ
 import org.slf4j.LoggerFactory
 import com.twitter.util.FuturePool
+import com.twitter.conversions.time._
 import org.scalatest.matchers.MustMatchers
-import org.zeromq.ZMQ.Context
-import java.util.Arrays
 import SocketType._
-import java.util.concurrent.{TimeUnit, Executors}
+import java.util.concurrent.{CountDownLatch, TimeUnit, Executors}
 
 class ClientReadHandleSpec extends Spec with MustMatchers {
   val log = LoggerFactory.getLogger(classOf[ClientReadHandleSpec])
 
-  def connectSubscriber(context: Context) = {
-    val socket = context.socket(ZMQ.SUB)
-    socket.connect("inproc://zmq-spec")
-    socket.subscribe(Array.empty)
-    socket
-  }
-  lazy val outgoingMessage = "hello"
-  
   describe("ZMQ Client ReadHandle") {
-    val endpoint = "inproc://client-spec"
+    val endpoint = "tcp://*:12345"
+    val connect = "tcp://localhost:12345"
     implicit val pool = FuturePool(Executors.newSingleThreadExecutor())
 
-    it("should read messages from socket") {
-      System.load("C:\\Program Files (x86)\\ZeroMQ 2.1.10\\lib\\libzmq.dll")
-/*      val context = ZMQ.context(1)
-      val (pub, sub, poller) = (
-        context.socket(ZMQ.PUB),
-        context.socket(ZMQ.SUB),
-        context.poller
-        )
-      pub.bind("inproc://zmq-spec")
-      sub.connect("inproc://zmq-spec")
-      sub.subscribe(Array.empty)
-      poller.register(sub)
-      pub.send(outgoingMessage.getBytes, 0)
-      poller.poll must equal(1)
-      poller.pollin(0) must equal(true)
-      val incomingMessage = sub.recv(0)
-      incomingMessage must equal(outgoingMessage.getBytes)
-      sub.close
-      pub.close*/
-
+    it("should read messages from PUB/SUB socket") {
       implicit val context = ZMQ.context(1)
 
-      val client = Client(Dealer)
-      client.bind(Bind(endpoint))
-      client.subscribe(Subscribe.all)
+      val pub = Client(Pub, options = Bind(endpoint) :: Nil)
+      val client = Client(Sub, options = Connect(connect) :: Subscribe.all :: PollTimeoutDuration(100.milliseconds) :: Nil)
 
-      val socket = context.socket(ZMQ.REQ)
-      socket.connect(endpoint)
+      val expectedMessages = 1000
+      for (i <- 1 to expectedMessages) pub.send("Message#"+i)
 
-      val readHandle = client.read
-      readHandle.messages() foreach {m =>
-        log.info("RECEIVED MESSAGE: " + m)
+      val readHandle = client.read[ZMQMessage]
+
+      val latch = new CountDownLatch(1)
+
+      var readNbr = 0
+      readHandle.messages foreach {m =>
+        readNbr += 1
+        if (readNbr == expectedMessages) latch.countDown()
       }
 
-      readHandle.error() foreach {err =>
-        log.error("ERROR: "+err)
+      @volatile var closed = false
+      readHandle.error foreach {
+        case ClientClosedException => closed = true
+        case _ => assert(false)
       }
 
-      Thread.sleep(100)
-
-      val mess = "Message".getBytes
-      log.info("Send message: " + Arrays.toString(mess))
-      socket.send(mess, 0)
-      log.info("Message sent: " + Arrays.toString(mess))
-
-      Thread.sleep(TimeUnit.SECONDS.toMillis(10))
-
+      latch.await(5, TimeUnit.SECONDS)
       readHandle.close()
+      pub.close()
 
-      Thread.sleep(100)
+      // -- Assert all messages received and client closed
+      log.info("Messages readed: " + readNbr)
+      assert(closed)
+      assert(readNbr == expectedMessages)
     }
   }
 

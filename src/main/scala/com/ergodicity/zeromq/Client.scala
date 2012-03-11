@@ -8,57 +8,102 @@ import com.twitter.conversions.time._
 import org.zeromq.ZMQ
 import annotation.tailrec
 import com.twitter.util._
+import com.ergodicity.zeromq.Frame._
 
 /**
  * Friendly ZMQ queue client
  */
 trait Client {
+  val log = LoggerFactory.getLogger(classOf[Client])
+
   type OptionHandler = PartialFunction[Any, Unit]
 
   def socket: Socket
   
-  def params: Seq[SocketMeta]
-
-  private val socketOptions = new Broker[SocketOption]
+  private val socketOps = new Broker[SocketOption]
 
   def bind(bind: Bind) {
-    socketOptions ! bind
+    socketOps ! bind
+  }
+
+  def connect(connect: Connect) {
+    socketOps ! connect
   }
 
   def subscribe(sub: Subscribe) {
-    socketOptions ! sub
+    socketOps ! sub
   }
 
   def unsubscribe(sub: Unsubscribe) {
-    socketOptions ! sub
+    socketOps ! sub
   }
 
-  def read(implicit pool: FuturePool): ReadHandle
+  def close() {
+    socket.close()
+  }
+
+  def send[T](obj: T)(implicit serializer: Serializer[T]) {
+
+    @tailrec def sendFrames(frames: Seq[Frame]) {
+      frames match {
+        case Nil =>
+          socket.send(Array[Byte](), 0)
+        case x :: Nil =>
+          socket.send(x.payload.toArray, 0)
+        case x :: xs =>
+          socket.send(x.payload.toArray, ZMQ.SNDMORE)
+          sendFrames(xs)
+      }
+    }
+
+    sendFrames(serializer(obj))
+  }
+  
+  def read[T](implicit deserializer: Deserializer[T], pool: FuturePool): ReadHandle[T]
 
   def handleConnectionOptions: OptionHandler = {
-    case Bind(endpoint) => socket.bind(endpoint)
+    case Bind(endpoint) =>
+      log.debug("Bind to endpoint: " + endpoint)
+      socket.bind(endpoint)
+
+    case Connect(endpoint) =>
+      log.debug("Connect to endpoint: " + endpoint)
+      socket.connect(endpoint)
   }
 
   def handleSubscribeOptions: OptionHandler = {
-    case Subscribe(payload) => socket.subscribe(payload.toArray)
-    case Unsubscribe(payload) => socket.unsubscribe(payload.toArray)
+    case Subscribe(payload) =>
+      log.debug("Subscribe to: " + payload)
+      socket.subscribe(payload.toArray)
+
+    case Unsubscribe(payload) =>
+      log.debug("Unsubscrive from: " + payload)
+      socket.unsubscribe(payload.toArray)
   }
 
   def handleUnknownOption: OptionHandler = {
-    case opt => throw new IllegalArgumentException("Unknown option: " + opt)
+    case opt => log.warn("Skip unknown option: " + opt)
+  }
+  
+  def !(option: SocketOption) {
+    socketOps ! option    
   }
 
-  socketOptions.recv foreach {
+  def !(options: Seq[SocketOption]) {
+    options foreach {socketOps ! _}
+  }
+
+  socketOps.recv foreach {
     handleConnectionOptions orElse handleSubscribeOptions orElse handleUnknownOption
   }
 }
 
 object Client {
-  val DefaultPollDuration = 100.millis
+  val DefaultPollDuration = 500.millis
 
-  def apply(t: ZMQSocketType)(implicit ctx: Context) = {
+  def apply(t: ZMQSocketType, options: Seq[SocketOption] = Seq())(implicit ctx: Context) = {
     val socket = ctx.socket(t.id)
-    new ConnectedClient(socket, ctx, Seq())
+    new ConnectedClient(socket, ctx, options)
   }
 }
 
@@ -67,9 +112,9 @@ private[zeromq] case object NoResults extends PollLifeCycle
 private[zeromq] case object Results extends PollLifeCycle
 private[zeromq] case object Closing extends PollLifeCycle
 
-trait ReadHandle {
+trait ReadHandle[T] {
 
-  val messages: Offer[ZMQMessage]
+  val messages: Offer[T]
 
   val error: Offer[Throwable]
 
@@ -78,11 +123,11 @@ trait ReadHandle {
 
 object ReadHandle {
   // A convenience constructor using an offer for closing.
-  def apply(
-             _messages: Offer[ZMQMessage],
+  def apply[T](
+             _messages: Offer[T],
              _error: Offer[Throwable],
              closeOf: Offer[Unit]
-             ): ReadHandle = new ReadHandle {
+             ): ReadHandle[T] = new ReadHandle[T] {
     val messages = _messages
     val error = _error
 
@@ -93,9 +138,7 @@ object ReadHandle {
 
 object ClientClosedException extends Exception
 
-protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, val params: Seq[SocketMeta]) extends Client {
-  val log = LoggerFactory.getLogger(classOf[ConnectedClient])
-
+protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, options: Seq[SocketOption]) extends Client {self =>
   type Receive = PartialFunction[Any, Unit]
 
   private sealed abstract class ClientLifecycle
@@ -105,18 +148,16 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, va
 
   private val noBytes = Array[Byte]()
 
+  self ! options
+
   private val pollTimeout = {
-    val fromConfig = params collectFirst { case PollTimeoutDuration(duration) ⇒ duration }
+    val fromConfig = options collectFirst { case PollTimeoutDuration(duration) ⇒ duration }
     fromConfig getOrElse Client.DefaultPollDuration
   }
 
-  private val deserializer = new ZMQMessageDeserializer
-
-  def read(implicit pool: FuturePool) = {
-    log.debug("Read from socket: " + socket)
-
+  def read[T](implicit deserializer: Deserializer[T], pool: FuturePool) = {
     val error = new Broker[Throwable]
-    val messages = new Broker[ZMQMessage]
+    val messages = new Broker[T]
     val close = new Broker[Unit]
 
     val actions = new Broker[ClientLifecycle]
@@ -125,14 +166,8 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, va
     poller.register(socket, ZMQ.Poller.POLLIN)
 
     def newEventLoop: Promise[PollLifeCycle] = {
-      log.debug("New event loop")
       (pool {
-        val cnt = poller.poll(1000000/*pollTimeout.inMicroseconds*/)
-        log.info("CNT: "+cnt)
-        for (i <- 0 to 31) {
-          log.info("POLLING #"+i+" = "+poller.pollin(i))
-        }
-        Thread.sleep(100)
+        val cnt = poller.poll(pollTimeout.inMicroseconds)
         if (cnt > 0 && poller.pollin(0))
           Results
         else
@@ -161,11 +196,9 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, va
       Offer.select(
         actions.recv {
           case Poll ⇒ {
-            log.debug("Poll")
             recv(None)
           }
           case ReceiveFrames ⇒ {
-            log.debug("Receive frames")
             receiveFrames() match {
               case Seq() ⇒
               case frames ⇒ messages ! deserializer(frames)
