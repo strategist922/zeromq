@@ -8,16 +8,22 @@ import HeartbeatProtocol._
 import com.twitter.conversions.time._
 import java.util.concurrent.{TimeUnit, CountDownLatch, Executors}
 import org.scalatest.{BeforeAndAfter, Spec}
+import java.util.UUID
 
 class HeartbeatStateSpec extends Spec with BeforeAndAfter {
   val log = LoggerFactory.getLogger(classOf[HeartbeatStateSpec])
 
   describe("Heartbeat server state") {
 
-    val PingEndpoint = "inproc://ping-q"
-    val PongEndpoint = "inproc://pong-q"
-    val PingConnection = "inproc://ping-q"
-    val PongConnection = "inproc://pong-q"
+//    val PingEndpoint = "inproc://ping-q"
+//    val PongEndpoint = "inproc://pong-q"
+//    val PingConnection = "inproc://ping-q"
+//    val PongConnection = "inproc://pong-q"
+
+        val PingEndpoint = "tcp://*:30000"
+        val PongEndpoint = "tcp://*:30001"
+        val PingConnection = "tcp://localhost:30000"
+    val PongConnection = "tcp://localhost:30001"
 
     val duration = 250.milliseconds
 
@@ -35,19 +41,56 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
         case _ => false
       })
 
-      server.close()
+      server.stop()
+    }
+    
+    it("should send Ping requests with given UUID") {
+      val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
+
+      Thread.sleep(500)
+
+      val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
+
+      val uuid = UUID.randomUUID()
+      server.sendPing(uuid)
+      server.sendPing(uuid)
+      server.sendPing(uuid)
+      server.sendPing(uuid)
+      server.sendPing(uuid)
+
+      Thread.sleep(500)
+
+      val pingReceived = new CountDownLatch(1)
+      val pingHandle = ping.read[Message]
+      pingHandle.messages foreach {msg =>
+        log.info("Got message: " + msg)
+        msg match {
+          case Ping(u) => if (u == uuid) pingReceived.countDown();
+          case _ =>
+        }
+      }
+
+      if (!pingReceived.await(5, TimeUnit.SECONDS)) {
+        assert(false, "Should never be here")
+      }
+
+      pingHandle.close()
+      ping.close()
+      server.stop()
     }
 
     it("should return Alive for valid Pong response") {
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
       val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
       val pong = Client(Dealer, options = Connect(PongConnection) :: Nil)
-
+      
+      val uid = UUID.randomUUID()
+      
       val latch = new CountDownLatch(3)
 
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-          case Ping(uid, d) =>
+          case Ping(uid) =>
             log.info("Ping receviced, send Pong")
             pong.send[Message](Pong(uid, identifier))
             latch.countDown()
@@ -64,7 +107,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
 
       // -- Close all
       pingHandle.close()
-      server.close()
+      server.stop()
       ping.close()
       pong.close();
 
@@ -91,7 +134,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
 
       val pingAlive = ping.read[Message]
       pingAlive.messages foreach {
-        case Ping(uid, d) =>
+        case Ping(uid) =>
           if (pingCnt == 0) {
             pong.send[Message](Pong(uid, identifier))
           } else if(pingCnt == 1) {
@@ -135,7 +178,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
 
       // -- Close all
       pingAlive.close()
-      server.close()
+      server.stop()
       ping.close()
       pong.close();
 

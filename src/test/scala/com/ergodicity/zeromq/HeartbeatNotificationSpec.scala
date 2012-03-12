@@ -44,7 +44,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u, d) =>
+        case Ping(u) =>
           pong.send[Message](Pong(u, identifier))
           latch.countDown()
         case _ =>
@@ -60,7 +60,7 @@ class HeartbeatNotificationSpec extends Spec {
       assert(connected)
 
       // -- Close all
-      server.close()
+      server.stop()
       ping.unsubscribe(Unsubscribe.all)
       pingHandle.close()
       ping.close()
@@ -84,7 +84,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u, d) => pong.send[Message](Pong(u, identifier))
+        case Ping(u) => pong.send[Message](Pong(u, identifier))
         case _ =>
       }
 
@@ -92,7 +92,7 @@ class HeartbeatNotificationSpec extends Spec {
       assert(connected)
 
       // -- Close all
-      server.close()
+      server.stop()
       ping.unsubscribe(Unsubscribe.all)
       pingHandle.close()
       ping.close()
@@ -111,7 +111,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u, d) =>
+        case Ping(u) =>
           if (!pongSent) {
             pong.send[Message](Pong(u, identifier))
             pongSent = true
@@ -133,7 +133,7 @@ class HeartbeatNotificationSpec extends Spec {
       assert(lost)
 
       // -- Close all
-      server.close()
+      server.stop()
       ping.unsubscribe(Unsubscribe.all)
       pingHandle.close()
       ping.close()
@@ -158,7 +158,7 @@ class HeartbeatNotificationSpec extends Spec {
       var pongSent = false;
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u, d) => if (!pongSent) {
+        case Ping(u) => if (!pongSent) {
           pong.send[Message](Pong(u, identifier))
           pongSent = true
         }
@@ -169,7 +169,7 @@ class HeartbeatNotificationSpec extends Spec {
       assert(lost)
 
       // -- Close all
-      server.close()
+      server.stop()
       ping.unsubscribe(Unsubscribe.all)
       pingHandle.close()
       ping.close()
@@ -197,7 +197,7 @@ class HeartbeatNotificationSpec extends Spec {
       var silence = false
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u, d) =>
+        case Ping(u) =>
           if (!silence) {
             try {
               pong.send[Message](Pong(u, identifier))
@@ -226,7 +226,7 @@ class HeartbeatNotificationSpec extends Spec {
       assert(connectedNbr == 1)
 
       // -- Close all
-      server.close()
+      server.stop()
       ping.unsubscribe(Unsubscribe.all)
       pingHandle.close()
       ping.close()

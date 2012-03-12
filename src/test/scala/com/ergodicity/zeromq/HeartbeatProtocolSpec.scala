@@ -13,14 +13,14 @@ class HeartbeatProtocolSpec extends Spec {
     it("should serialize Ping message") {
       val uid = UUID.randomUUID()
       val duration = 100.milliseconds
-      val ping = Ping(uid, duration)
+      val ping = Ping(uid)
 
       val bytes = toByteArray[Message](ping)
 
       val heartbeat = fromByteArray[Message](bytes)
 
       assert(heartbeat match {
-        case Ping(u, d) => u == uid && d == duration
+        case Ping(u) => u == uid
         case _ => false
       })
     }

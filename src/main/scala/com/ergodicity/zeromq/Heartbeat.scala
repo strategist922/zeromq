@@ -2,7 +2,6 @@ package com.ergodicity.zeromq
 
 import java.util.UUID
 import org.slf4j.LoggerFactory
-import org.zeromq.ZMQ.Context
 import com.twitter.finagle.util.Timer
 import com.twitter.conversions.time._
 import org.jboss.netty.util.HashedWheelTimer
@@ -10,15 +9,16 @@ import sbinary._
 import Operations._
 import com.twitter.util.{TimerTask, FuturePool, Duration}
 import concurrent.stm._
-import com.twitter.concurrent.Broker
 import com.ergodicity.zeromq.SocketType.{Sub, Dealer, Pub}
 import java.util.concurrent.CountDownLatch
+import com.twitter.concurrent.{Offer, Broker}
+import org.zeromq.ZMQ.{Socket, Context}
 
 case class Identifier(id: String)
 
 protected sealed trait Message
 
-protected case class Ping(uid: UUID, duration: Duration) extends Message
+protected case class Ping(uid: UUID) extends Message
 
 protected case class Pong(uid: UUID, identifier: Identifier) extends Message
 
@@ -50,16 +50,15 @@ object HeartbeatProtocol extends DefaultProtocol {
 
   implicit object HeartbeatFormat extends Format[Message] {
     def reads(in: Input) = read[Byte](in) match {
-      case 0 => Ping(read[UUID](in), read[Duration](in))
+      case 0 => Ping(read[UUID](in))
       case 1 => Pong(read[UUID](in), read[Identifier](in))
       case _ => throw new RuntimeException("Unsupported Heartbeat message")
     }
 
     def writes(out: Output, heartbeat: Message) = heartbeat match {
-      case Ping(uid, duration) =>
+      case Ping(uid) =>
         write[Byte](out, 0)
         write[UUID](out, uid)
-        write[Duration](out, duration)
       case Pong(uid, identifier) =>
         write[Byte](out, 1)
         write[UUID](out, uid)
@@ -84,14 +83,17 @@ object HeartbeatProtocol extends DefaultProtocol {
 
 case class HeartbeatRef(ping: String, pong: String)
 
+
 protected sealed trait State
 protected case class Alive(die: TimerTask) extends State
 protected case object Dead extends State
 protected case object WalkingDead extends State
 
+
 sealed trait Notification
 case object Connected extends Notification
 case object Lost extends Notification
+
 
 class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int = 3)
                (implicit context: Context, pool: FuturePool) {
@@ -105,28 +107,30 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
   private val ping = Client(Pub, options = Bind(ref.ping) :: Nil)
   private val pong = Client(Dealer, options = Bind(ref.pong) :: Nil)
 
-  private val pendingUUID = Ref(List[UUID]())
+  private val pendingUUID = Ref(List[(UUID, Broker[Pong])]())
   private val patients = Ref(Map[Identifier, State]())
   private val trackers = Ref(List[(Identifier, Broker[Notification])]())
 
-  // -- Send Ping messages
-  val pingTask = Timer.schedule(duration) {
-    val uuid = UUID.randomUUID()
-    atomic {
-      implicit txn =>
-        log.info("PING: " + uuid)
-        pendingUUID.transform(list => (uuid :: list).slice(0, lossLimit))
+  def sendPing(uuid: UUID): Offer[Pong] = {
+    log.info("PING: " + uuid)
+    val broker = new Broker[Pong]()
+    atomic {implicit txn =>
+        pendingUUID.transform(l => ((uuid, broker) :: l).slice(0, lossLimit))
     }
-    ping.send[Message](Ping(uuid, duration))
+    ping.send[Message](Ping(uuid))
+    broker.recv
+  }
+
+  def start = Timer.schedule(duration) {
+    sendPing(UUID.randomUUID())
   }
 
   // -- Handle Pong messages
   val pongHandle = pong.read[Message]
   pongHandle.messages foreach {
-    case Pong(uid, identifier) =>
-      pendingUUID.single() find (_ == uid) foreach {
-        _ => // only if UUID presented
-
+    case pong@Pong(uid, identifier) =>
+      pendingUUID.single() find (_._1 == uid) foreach {
+        tuple => // only if UUID presented
           val notification = atomic {
             implicit txt =>
               val (state, notification) = patients().get(identifier).map {
@@ -147,6 +151,9 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
                 _._2 ! notify
               }
           }
+
+          // Forward Pong to broker
+          tuple._2 ! pong
       }
       log.info("PATIENTS: " + patients.single())
       log.info("PendingPingUUID: " + pendingUUID.single())
@@ -197,13 +204,12 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
     broker.recv
   }
 
-  def close() {
-    log.info("Close Heartbeat")
+  def stop() {
+    log.info("Stop Heartbeat")
     atomic {implicit txn =>
       pendingUUID.transform(_ => List())
       trackers.transform(_ => List())
     }
-    pingTask.cancel()
     pongHandle.close()
     pong.close()
     ping.close()
@@ -221,13 +227,13 @@ class Patient(ref: HeartbeatRef, identifier: Identifier)
 
   val pingHandle = ping.read[Message]
   pingHandle.messages foreach {
-    case Ping(u, d) =>
-      pong.send[Message](Pong(u, identifier))
+    case Ping(u) => pong.send[Message](Pong(u, identifier))
     case _ =>
   }
 
   def close() {
     pingHandle.close()
+    ping.unsubscribe(Unsubscribe.all)
     ping.close()
     pong.close()
   }

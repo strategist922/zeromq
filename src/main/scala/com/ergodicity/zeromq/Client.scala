@@ -99,7 +99,7 @@ trait Client {
 }
 
 object Client {
-  val DefaultPollDuration = 500.millis
+  val DefaultPollDuration = 10000.millis
 
   def apply(t: ZMQSocketType, options: Seq[SocketOption] = Seq())(implicit ctx: Context) = {
     val socket = ctx.socket(t.id)
@@ -154,6 +154,12 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
     val fromConfig = options collectFirst { case PollTimeoutDuration(duration) ⇒ duration }
     fromConfig getOrElse Client.DefaultPollDuration
   }
+  
+  private def withSocket[A](f: Socket=>A): A = {
+    socket.synchronized {
+      f(socket)
+    }
+  }
 
   def read[T](implicit deserializer: Deserializer[T], pool: FuturePool) = {
     val error = new Broker[Throwable]
@@ -163,7 +169,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
     val actions = new Broker[ClientLifecycle]
 
     val poller = context.poller
-    poller.register(socket, ZMQ.Poller.POLLIN)
+    withSocket(poller.register(_, ZMQ.Poller.POLLIN))
 
     def newEventLoop: Promise[PollLifeCycle] = {
       (pool {
@@ -180,7 +186,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
       }).asInstanceOf[Promise[PollLifeCycle]]
     }
 
-    def receiveFrames(): Seq[Frame] = {
+    def receiveFrames(socket: Socket): Seq[Frame] = {
       @tailrec def receiveBytes(next: Array[Byte], currentFrames: Vector[Frame] = Vector.empty): Seq[Frame] = {
         val nwBytes = if (next != null && next.nonEmpty) next else noBytes
         val frames = currentFrames :+ Frame(nwBytes)
@@ -199,7 +205,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
             recv(None)
           }
           case ReceiveFrames ⇒ {
-            receiveFrames() match {
+            withSocket {receiveFrames(_)} match {
               case Seq() ⇒
               case frames ⇒ messages ! deserializer(frames)
             }
@@ -213,7 +219,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
         },
 
         close.recv { _ =>
-          poller.unregister(socket)
+          withSocket {poller.unregister(_)}
           currentPoll.cancel()
           error ! ClientClosedException
         }
