@@ -10,9 +10,8 @@ import Operations._
 import com.twitter.util.{TimerTask, FuturePool, Duration}
 import concurrent.stm._
 import com.ergodicity.zeromq.SocketType._
-import java.util.concurrent.CountDownLatch
 import com.twitter.concurrent.{Offer, Broker}
-import org.zeromq.ZMQ.{Socket, Context}
+import org.zeromq.ZMQ.Context
 
 case class Identifier(id: String)
 
