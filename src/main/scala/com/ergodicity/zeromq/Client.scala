@@ -8,7 +8,6 @@ import com.twitter.conversions.time._
 import org.zeromq.ZMQ
 import annotation.tailrec
 import com.twitter.util._
-import com.ergodicity.zeromq.Frame._
 
 /**
  * Friendly ZMQ queue client
@@ -99,7 +98,7 @@ trait Client {
 }
 
 object Client {
-  val DefaultPollDuration = 10000.millis
+  val DefaultPollDuration = 1000.millis
 
   def apply(t: ZMQSocketType, options: Seq[SocketOption] = Seq())(implicit ctx: Context) = {
     val socket = ctx.socket(t.id)
@@ -155,12 +154,6 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
     fromConfig getOrElse Client.DefaultPollDuration
   }
   
-  private def withSocket[A](f: Socket=>A): A = {
-    socket.synchronized {
-      f(socket)
-    }
-  }
-
   def read[T](implicit deserializer: Deserializer[T], pool: FuturePool) = {
     val error = new Broker[Throwable]
     val messages = new Broker[T]
@@ -169,7 +162,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
     val actions = new Broker[ClientLifecycle]
 
     val poller = context.poller
-    withSocket(poller.register(_, ZMQ.Poller.POLLIN))
+    poller.register(socket, ZMQ.Poller.POLLIN)
 
     def newEventLoop: Promise[PollLifeCycle] = {
       (pool {
@@ -186,7 +179,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
       }).asInstanceOf[Promise[PollLifeCycle]]
     }
 
-    def receiveFrames(socket: Socket): Seq[Frame] = {
+    def receiveFrames(): Seq[Frame] = {
       @tailrec def receiveBytes(next: Array[Byte], currentFrames: Vector[Frame] = Vector.empty): Seq[Frame] = {
         val nwBytes = if (next != null && next.nonEmpty) next else noBytes
         val frames = currentFrames :+ Frame(nwBytes)
@@ -205,7 +198,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
             recv(None)
           }
           case ReceiveFrames ⇒ {
-            withSocket {receiveFrames(_)} match {
+            receiveFrames() match {
               case Seq() ⇒
               case frames ⇒ messages ! deserializer(frames)
             }
@@ -219,9 +212,9 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
         },
 
         close.recv { _ =>
-          withSocket {poller.unregister(_)}
           currentPoll.cancel()
           error ! ClientClosedException
+          poller.unregister(socket)
         }
       )
     }

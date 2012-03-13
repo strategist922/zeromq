@@ -4,9 +4,8 @@ import org.scalatest.Spec
 import org.slf4j.LoggerFactory
 import org.zeromq.ZMQ
 import java.util.concurrent.{TimeUnit, CountDownLatch, Executors}
-import com.twitter.conversions.time._
 import com.twitter.util.FuturePool
-import com.ergodicity.zeromq.SocketType.{Dealer, Pub}
+import com.ergodicity.zeromq.SocketType._
 import java.util.UUID
 import HeartbeatProtocol._
 
@@ -14,8 +13,8 @@ class PatientSpec extends Spec {
   val log = LoggerFactory.getLogger(classOf[HeartbeatNotificationSpec])
 
   describe("Patient") {
-    val PingEndpoint = "inproc://ping-patient-spec"
-    val PongEndpoint = "inproc://pong-patient-spec"
+    val PingEndpoint = "inproc://ping"
+    val PongEndpoint = "inproc://pong"
 
     implicit val pool = FuturePool(Executors.newSingleThreadExecutor())
     val identifier = Identifier("TestId")
@@ -25,17 +24,18 @@ class PatientSpec extends Spec {
 
     it("should repond with Pong if it's alive") {
       val ping = Client(Pub, options = Bind(PingEndpoint) :: Nil)
-      val pong = Client(Dealer, options = Bind(PongEndpoint) :: Nil)
+      val pong = Client(XReq, options = Bind(PongEndpoint) :: Nil)
 
       val patient = new Patient(ref, identifier)
 
       val uuid = UUID.randomUUID()
-      // -- Send Ping
+      // Send Ping
       ping.send[Message](Ping(uuid))
 
-      // -- Read Pongs
+      // Read Pongs
       val latch = new CountDownLatch(1)
-      pong.read[Message].messages foreach {
+      val handle = pong.read[Message]
+      handle.messages foreach {
         case pong@Pong(u, i) => {
           log.info("Pong: " + pong)
           if (u == uuid && i == identifier) latch.countDown()
@@ -47,6 +47,8 @@ class PatientSpec extends Spec {
         throw new IllegalStateException
       }
 
+      // Close all
+      handle.close()
       patient.close()
       ping.close()
       pong.close()

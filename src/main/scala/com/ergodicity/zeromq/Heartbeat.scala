@@ -9,7 +9,7 @@ import sbinary._
 import Operations._
 import com.twitter.util.{TimerTask, FuturePool, Duration}
 import concurrent.stm._
-import com.ergodicity.zeromq.SocketType.{Sub, Dealer, Pub}
+import com.ergodicity.zeromq.SocketType._
 import java.util.concurrent.CountDownLatch
 import com.twitter.concurrent.{Offer, Broker}
 import org.zeromq.ZMQ.{Socket, Context}
@@ -74,7 +74,7 @@ object HeartbeatProtocol extends DefaultProtocol {
     def apply(frames: Seq[Frame]) = {
       frames.toList match {
         case x :: Nil => fromByteArray[Message](x.payload.toArray)
-        case _ => throw new IllegalArgumentException("Illegal frames sequence")
+        case seq => throw new IllegalArgumentException("Illegal frames sequence: "+seq)
       }
     }
   }
@@ -104,14 +104,14 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
 
   private val Timer = new Timer(new HashedWheelTimer())
 
-  private val ping = Client(Pub, options = Bind(ref.ping) :: Nil)
-  private val pong = Client(Dealer, options = Bind(ref.pong) :: Nil)
-
   private val pendingUUID = Ref(List[(UUID, Broker[Pong])]())
   private val patients = Ref(Map[Identifier, State]())
   private val trackers = Ref(List[(Identifier, Broker[Notification])]())
 
-  def sendPing(uuid: UUID): Offer[Pong] = {
+  private val ping = Client(Pub, options = Bind(ref.ping) :: Nil)
+  private val pong = Client(XReq, options = Bind(ref.pong) :: Nil)
+
+  def ping(uuid: UUID): Offer[Pong] = {
     log.info("PING: " + uuid)
     val broker = new Broker[Pong]()
     atomic {implicit txn =>
@@ -122,7 +122,7 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
   }
 
   def start = Timer.schedule(duration) {
-    sendPing(UUID.randomUUID())
+    ping(UUID.randomUUID())
   }
 
   // -- Handle Pong messages
@@ -163,7 +163,7 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
 
   pongHandle.error foreach {
     case ClientClosedException => log.debug("Pong handle closed")
-    case err => log.error("Hertbeat server error: " + err)
+    case err => log.error("Heartbeat server error: " + err)
   }
 
   private def scheduleDeath(identifier: Identifier) = {
@@ -223,7 +223,7 @@ class Patient(ref: HeartbeatRef, identifier: Identifier)
   import HeartbeatProtocol._
 
   val ping = Client(Sub, options = Connect(ref.ping) :: Subscribe.all :: Nil)
-  val pong = Client(Dealer, options = Connect(ref.pong) :: Nil)
+  val pong = Client(XReq, options = Connect(ref.pong) :: Nil)
 
   val pingHandle = ping.read[Message]
   pingHandle.messages foreach {

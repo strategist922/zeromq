@@ -27,12 +27,13 @@ object SocketType {
 
   abstract case class ZMQSocketType(id: Int)
 
-  object Dealer extends ZMQSocketType(ZMQ.DEALER)
+  object XReq extends ZMQSocketType(ZMQ.XREQ)
+  object XRep extends ZMQSocketType(ZMQ.XREP)
 
   object Pub extends ZMQSocketType(ZMQ.PUB)
-
   object Sub extends ZMQSocketType(ZMQ.SUB)
 
+  object Req extends ZMQSocketType(ZMQ.REQ)
   object Rep extends ZMQSocketType(ZMQ.REP)
 }
 

@@ -32,7 +32,7 @@ object ZeroMQBuild extends Build {
 object Dependencies {
   import Dependency._
 
-  val root = Seq(zmqScalaBinding, ostrich, scalaTime, sbinary, finagleCore, scalaSTM, slf4jApi, logback, scalaz, jodaTime, jodaConvert) ++
+  val root = Seq(ostrich, scalaTime, sbinary, finagleCore, scalaSTM, slf4jApi, logback, scalaz, jodaTime, jodaConvert) ++
     Seq(Test.mockito, Test.scalatest, Test.scalacheck)
 }
 
@@ -55,7 +55,6 @@ object Dependency {
     val SBinary      = "0.4.0"
     val ScalaTime    = "0.5"
     val Ostrich      = "4.10.6"
-    val ZmqScala     = "0.0.5"
   }
 
   // Compile
@@ -71,7 +70,6 @@ object Dependency {
   val ostrich           = "com.twitter"                      %% "ostrich"                % V.Ostrich
   val sbinary           = "org.scala-tools.sbinary"          %% "sbinary"                % V.SBinary
   val scalaTime         = "org.scala-tools.time"             %% "time"                   % V.ScalaTime
-  val zmqScalaBinding   = "org.zeromq"                       %% "zeromq-scala-binding"   % V.ZmqScala
 
   // Provided
 

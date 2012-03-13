@@ -1,9 +1,9 @@
 package com.ergodicity.zeromq
 
-import org.scalatest.WordSpec
 import org.scalatest.matchers.MustMatchers
 import org.zeromq.ZMQ._
 import org.zeromq.ZMQ
+import org.scalatest.WordSpec
 
 class ZMQSpec extends WordSpec with MustMatchers {
   "ZMQ" must {

@@ -3,7 +3,7 @@ package com.ergodicity.zeromq
 import org.scalatest.Spec
 import org.mockito.Mockito._
 import org.zeromq.ZMQ.{Context, Socket}
-import com.ergodicity.zeromq.SocketType.Dealer
+import com.ergodicity.zeromq.SocketType.XReq
 import org.zeromq.ZMQ
 
 class ClientSpec extends Spec {
@@ -14,8 +14,8 @@ class ClientSpec extends Spec {
     it("should bind socket") {
       implicit val context = mock(classOf[Context])
       val socket = mock(classOf[Socket])
-      when(context.socket(Dealer.id)).thenReturn(socket)
-      val client = Client(Dealer)
+      when(context.socket(XReq.id)).thenReturn(socket)
+      val client = Client(XReq)
 
       client.bind(Bind("endpoint"))
 
@@ -25,8 +25,8 @@ class ClientSpec extends Spec {
     it("should subscribe and unsubscribe") {
       implicit val context = mock(classOf[Context])
       val socket = mock(classOf[Socket])
-      when(context.socket(Dealer.id)).thenReturn(socket)
-      val client = Client(Dealer)
+      when(context.socket(XReq.id)).thenReturn(socket)
+      val client = Client(XReq)
 
       client.subscribe(Subscribe("subscribe1"))
       client.subscribe(Subscribe("subscribe2"))
@@ -40,8 +40,8 @@ class ClientSpec extends Spec {
     it("should send empty frames") {
       implicit val context = mock(classOf[Context])
       val socket = mock(classOf[Socket])
-      when(context.socket(Dealer.id)).thenReturn(socket)
-      val client = Client(Dealer)
+      when(context.socket(XReq.id)).thenReturn(socket)
+      val client = Client(XReq)
 
       implicit val zeroFramesSerializer = new Serializer[Msg] {
         def apply(obj: ClientSpec.this.type#Msg) = Seq()
@@ -54,8 +54,8 @@ class ClientSpec extends Spec {
     it("should send one frame") {
       implicit val context = mock(classOf[Context])
       val socket = mock(classOf[Socket])
-      when(context.socket(Dealer.id)).thenReturn(socket)
-      val client = Client(Dealer)
+      when(context.socket(XReq.id)).thenReturn(socket)
+      val client = Client(XReq)
 
       val bytes = "Bytes".getBytes
       implicit val zeroFramesSerializer = new Serializer[Msg] {
@@ -69,8 +69,8 @@ class ClientSpec extends Spec {
     it("should send two and more frame") {
       implicit val context = mock(classOf[Context])
       val socket = mock(classOf[Socket])
-      when(context.socket(Dealer.id)).thenReturn(socket)
-      val client = Client(Dealer)
+      when(context.socket(XReq.id)).thenReturn(socket)
+      val client = Client(XReq)
 
       val bytes1 = "Bytes1".getBytes
       val bytes2 = "Bytes2".getBytes

@@ -13,15 +13,14 @@ class ClientReadHandleSpec extends Spec with MustMatchers {
   val log = LoggerFactory.getLogger(classOf[ClientReadHandleSpec])
 
   describe("ZMQ Client ReadHandle") {
-    val endpoint = "tcp://*:12345"
-    val connect = "tcp://localhost:12345"
+    val endpoint = "inproc://readhandle-spec"
     implicit val pool = FuturePool(Executors.newSingleThreadExecutor())
 
     it("should read messages from PUB/SUB socket") {
       implicit val context = ZMQ.context(1)
 
       val pub = Client(Pub, options = Bind(endpoint) :: Nil)
-      val client = Client(Sub, options = Connect(connect) :: Subscribe.all :: PollTimeoutDuration(100.milliseconds) :: Nil)
+      val client = Client(Sub, options = Connect(endpoint) :: Subscribe.all :: PollTimeoutDuration(250.milliseconds) :: Nil)
 
       val expectedMessages = 1000
       for (i <- 1 to expectedMessages) pub.send("Message#"+i)

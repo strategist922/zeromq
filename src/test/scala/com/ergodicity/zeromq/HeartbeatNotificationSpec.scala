@@ -3,11 +3,12 @@ package com.ergodicity.zeromq
 import org.scalatest.Spec
 import org.zeromq.ZMQ
 import org.slf4j.LoggerFactory
-import com.twitter.util.FuturePool
-import com.ergodicity.zeromq.SocketType.{Dealer, Sub}
+import com.ergodicity.zeromq.SocketType.{XReq, Sub}
 import java.util.concurrent.{TimeUnit, CountDownLatch, Executors}
 import com.twitter.conversions.time._
 import HeartbeatProtocol._
+import java.util.UUID
+import com.twitter.util.{Return, FuturePool}
 
 class HeartbeatNotificationSpec extends Spec {
   val log = LoggerFactory.getLogger(classOf[HeartbeatNotificationSpec])
@@ -15,222 +16,200 @@ class HeartbeatNotificationSpec extends Spec {
   describe("Heartbeat Notifications") {
 
 
-    val PingEndpoint = "inproc://ping-notify-spec"
-    val PongEndpoint = "inproc://pong-notify-spec"
-    val PingConnection = "inproc://ping-notify-spec"
-    val PongConnection = "inproc://pong-notify-spec"
+    val PingEndpoint = "inproc://ping"
+    val PongEndpoint = "inproc://pong"
 
-    //    val PingEndpoint = "tcp://*:30000"
-    //    val PongEndpoint = "tcp://*:30001"
-    //    val PingConnection = "tcp://localhost:30000"
-    //    val PongConnection = "tcp://localhost:30001"
+    val duration = 250.milliseconds
 
-    val duration = 350.milliseconds
-
-    implicit val pool = FuturePool(Executors.newSingleThreadExecutor())
+    implicit val pool = FuturePool(Executors.newCachedThreadPool())
     val identifier = Identifier("TestId")
-
 
     val ref = HeartbeatRef(PingEndpoint, PongEndpoint)
 
+    implicit val context = ZMQ.context(1)
+
     it("Should send 'Connected' notification instantly when patient already Alive") {
-      implicit val context = ZMQ.context(1)
+      val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
-      val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
-      val pong = Client(Dealer, options = Connect(PongConnection) :: Nil)
+      val ping = Client(Sub, options = Connect(PingEndpoint) :: Subscribe.all :: Nil)
+      val pong = Client(XReq, options = Connect(PongEndpoint) :: Nil)
 
-      val latch = new CountDownLatch(3)
+      val pongReceived = new CountDownLatch(1)
+
+      server.ping(uuid)() foreach {
+        case Pong(u, i) if u == uuid && i == identifier => pongReceived.countDown()
+      }
 
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u) =>
-          pong.send[Message](Pong(u, identifier))
-          latch.countDown()
+        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
         case _ =>
       }
 
-      latch.await(3, TimeUnit.SECONDS)
+      assert(pongReceived.await(3, TimeUnit.SECONDS), "Pong not received")
 
-      var connected = false
-      server.track(identifier)() foreach {
-        case Connected => connected = true
+      val notificationLatch = new CountDownLatch(1)
+      server.track(identifier)() respond {
+        case Return(Connected) => notificationLatch.countDown()
         case _ =>
       }
-      assert(connected)
+      assert(notificationLatch.await(3, TimeUnit.SECONDS), "Notification not received")
 
-      // -- Close all
-      server.stop()
-      ping.unsubscribe(Unsubscribe.all)
+      // Close all
       pingHandle.close()
+      server.stop()
       ping.close()
       pong.close();
     }
 
     it("Should send 'Connected' notification after became alive") {
-      implicit val context = ZMQ.context(1)
+      val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
-      val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
-      val pong = Client(Dealer, options = Connect(PongConnection) :: Nil)
+      val ping = Client(Sub, options = Connect(PingEndpoint) :: Subscribe.all :: Nil)
+      val pong = Client(XReq, options = Connect(PongEndpoint) :: Nil)
 
-      val latch = new CountDownLatch(1)
-
-      var connected = false
-      server.track(identifier) foreach {
-          case Connected => connected = true; latch.countDown()
-          case _ =>
-      }
-
-      val pingHandle = ping.read[Message]
-      pingHandle.messages foreach {
-        case Ping(u) => pong.send[Message](Pong(u, identifier))
+      val notificationLatch = new CountDownLatch(1)
+      server.track(identifier)() respond {
+        case Return(Connected) => notificationLatch.countDown()
         case _ =>
       }
 
-      latch.await(3, TimeUnit.SECONDS)
-      assert(connected)
+      server.ping(uuid)
 
-      // -- Close all
-      server.stop()
-      ping.unsubscribe(Unsubscribe.all)
+      val pingHandle = ping.read[Message]
+      pingHandle.messages foreach {
+        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case _ =>
+      }
+
+      assert(notificationLatch.await(3, TimeUnit.SECONDS), "Notification not received")
+
+      // Close all
       pingHandle.close()
+      server.stop()
       ping.close()
       pong.close();
     }
 
     it("Should send 'Lost' notification instantly when patient already Dead") {
-      implicit val context = ZMQ.context(1)
+      val uuid = UUID.randomUUID()
 
-      val server = new Heartbeat(ref, duration = duration, lossLimit = 2)
-      val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
-      val pong = Client(Dealer, options = Connect(PongConnection) :: Nil)
+      val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
+      val ping = Client(Sub, options = Connect(PingEndpoint) :: Subscribe.all :: Nil)
+      val pong = Client(XReq, options = Connect(PongEndpoint) :: Nil)
 
-      val latch = new CountDownLatch(1)
-      var pongSent = false;
+      server.ping(uuid)
 
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u) =>
-          if (!pongSent) {
-            pong.send[Message](Pong(u, identifier))
-            pongSent = true
-          }
-          server.getState(identifier) match {
-            case Some(Dead) => latch.countDown()
-            case _ =>
-          }
+        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
         case _ =>
       }
 
-      latch.await(3, TimeUnit.SECONDS)
+      // Let the Patient to die
+      Thread.sleep((duration * 2).inMilliseconds)
 
-      var lost = false
-      server.track(identifier)() foreach {
-        case Lost => lost = true
+      val notificationLatch = new CountDownLatch(1)
+      server.track(identifier)() respond {
+        case Return(Lost) => notificationLatch.countDown()
         case _ =>
       }
-      assert(lost)
+      assert(notificationLatch.await(3, TimeUnit.SECONDS), "Notification not received")
 
-      // -- Close all
-      server.stop()
-      ping.unsubscribe(Unsubscribe.all)
+      // Close all
       pingHandle.close()
+      server.stop()
       ping.close()
       pong.close();
     }
 
-    it("Should send 'Lost' notification when patient Dead") {
-      implicit val context = ZMQ.context(1)
+    it("Should send 'Connected' and 'Lost' notifications") {
+      val uuid = UUID.randomUUID()
 
-      val server = new Heartbeat(ref, duration = duration, lossLimit = 2)
-      val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
-      val pong = Client(Dealer, options = Connect(PongConnection) :: Nil)
+      val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
+      val ping = Client(Sub, options = Connect(PingEndpoint) :: Subscribe.all :: Nil)
+      val pong = Client(XReq, options = Connect(PongEndpoint) :: Nil)
 
-      val latch = new CountDownLatch(1)
-
-      var lost = false
+      val connectedLatch = new CountDownLatch(1)
+      val lostLatch = new CountDownLatch(1)
       server.track(identifier) foreach {
-        case Lost => lost = true; latch.countDown()
+        case Connected => connectedLatch.countDown()
+        case Lost => lostLatch.countDown()
         case _ =>
       }
 
-      var pongSent = false;
+      server.ping(uuid)
+
       val pingHandle = ping.read[Message]
       pingHandle.messages foreach {
-        case Ping(u) => if (!pongSent) {
-          pong.send[Message](Pong(u, identifier))
-          pongSent = true
-        }
+        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
         case _ =>
       }
 
-      latch.await(3, TimeUnit.SECONDS)
-      assert(lost)
+      assert(connectedLatch.await(2, TimeUnit.SECONDS), "Connected notification not received")
+      assert(lostLatch.await(2, TimeUnit.SECONDS), "Loadt notification not received")
 
-      // -- Close all
-      server.stop()
-      ping.unsubscribe(Unsubscribe.all)
+      // Close all
       pingHandle.close()
+      server.stop()
       ping.close()
       pong.close();
     }
 
     it("Should send only one unique notification for walking deads") {
-      implicit val context = ZMQ.context(1)
+      val uuid = UUID.randomUUID()
 
-      val server = new Heartbeat(ref, duration = duration, lossLimit = 2)
-      val ping = Client(Sub, options = Connect(PingConnection) :: Subscribe.all :: Nil)
-      val pong = Client(Dealer, options = Connect(PongConnection) :: Nil)
+      val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
+      val ping = Client(Sub, options = Connect(PingEndpoint) :: Subscribe.all :: Nil)
+      val pong = Client(XReq, options = Connect(PongEndpoint) :: Nil)
 
+      var connectedNbr = 0;
+      var lostNbr = 0;
       val connectedLatch = new CountDownLatch(1)
       val lostLatch = new CountDownLatch(1)
-      val walkingDeadLatch = new CountDownLatch(1)
-
-      var connectedNbr = 0
-      var lostNbr = 0
       server.track(identifier) foreach {
         case Connected => connectedNbr += 1; connectedLatch.countDown()
         case Lost => lostNbr += 1; lostLatch.countDown()
-      }
-
-      var silence = false
-      val pingHandle = ping.read[Message]
-      pingHandle.messages foreach {
-        case Ping(u) =>
-          if (!silence) {
-            try {
-              pong.send[Message](Pong(u, identifier))
-            } catch {
-              case _ =>
-            }
-          }
-          server.getState(identifier) match {
-            case Some(WalkingDead) => walkingDeadLatch.countDown()
-            case _ =>
-          }
         case _ =>
       }
 
-      connectedLatch.await(3, TimeUnit.SECONDS)
-      silence = true
-      lostLatch.await(3, TimeUnit.SECONDS)
-      silence = false;
-      walkingDeadLatch.await(3, TimeUnit.SECONDS)
+      server.ping(uuid)
+
+      val pingHandle = ping.read[Message]
+      pingHandle.messages foreach {
+        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case _ =>
+      }
+
+      assert(connectedLatch.await(2, TimeUnit.SECONDS), "Connected notification not received")
+      assert(lostLatch.await(2, TimeUnit.SECONDS), "Lost notification not received")
+
+      // Sleep a little bit
+      Thread.sleep(duration)
+      
+      // Raised from death!!!
+      val walkingDeadLatch = new CountDownLatch(1)
+      server.ping(uuid)() foreach {
+        case Pong(u, i) => if (u == uuid && i == identifier) walkingDeadLatch.countDown()
+      }
+
+      assert(walkingDeadLatch.await(3, TimeUnit.SECONDS), "Patient not raised from death")
 
       assert(server.getState(identifier) match {
         case Some(WalkingDead) => true
-        case err => log.error("Error state: "+err); false
+        case _ => false
       })
-      assert(lostNbr == 1)
-      assert(connectedNbr == 1)
 
-      // -- Close all
-      server.stop()
-      ping.unsubscribe(Unsubscribe.all)
+      assert(connectedNbr == 1)
+      assert(lostNbr == 1)
+
+      // Close all
       pingHandle.close()
       ping.close()
       pong.close();
+      server.stop()
     }
   }
 }
