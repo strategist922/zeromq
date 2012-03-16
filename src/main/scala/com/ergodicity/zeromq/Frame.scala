@@ -44,8 +44,15 @@ trait Deserializer[T] {
 }
 
 object Deserializer {
-  implicit val ZMQMessageDeserializer = new Deserializer[ZMQMessage] {
+  implicit object ZMQMessageDeserializer extends Deserializer[ZMQMessage] {
     def apply(frames: Seq[Frame]) = ZMQMessage(frames)
+  }
+
+  implicit object StringDeserializer extends Deserializer[String] {
+    def apply(frames: Seq[Frame]) = frames.toList match {
+      case x :: Nil => new String(x.payload.toArray)
+      case _ => throw new IllegalStateException("Unexpected frames sequence")
+    }
   }
 }
 
@@ -55,7 +62,7 @@ trait Serializer[T] {
 
 
 object Serializer {
-  implicit val StringSerializer = new Serializer[String] {
+  implicit object StringSerializer extends Serializer[String] {
     def apply(obj: String) = Seq(Frame(obj))
   }
 }

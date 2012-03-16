@@ -8,6 +8,7 @@ import com.twitter.conversions.time._
 import org.zeromq.ZMQ
 import annotation.tailrec
 import com.twitter.util._
+import com.ergodicity.zeromq.Frame._
 
 /**
  * Friendly ZMQ queue client
@@ -57,7 +58,32 @@ trait Client {
 
     sendFrames(serializer(obj))
   }
+
+  def ask[T](obj: T)(implicit serializer: Serializer[T], deserializer: Deserializer[T]) = {
+    send(obj)
+    recv[T]
+  }
+
+  def recv[T](implicit deserializer: Deserializer[T]) = {
+    deserializer(receiveFrames())
+  }
+
+  def ![T](obj: T)(implicit serializer: Serializer[T]) = send(obj)
   
+  def ?[T](obj: T)(implicit serializer: Serializer[T], deserializer: Deserializer[T]) = ask(obj)
+
+  protected def receiveFrames(): Seq[Frame] = {
+    val noBytes = Array[Byte]()
+
+    @tailrec def receiveBytes(next: Array[Byte], currentFrames: Vector[Frame] = Vector.empty): Seq[Frame] = {
+      val nwBytes = if (next != null && next.nonEmpty) next else noBytes
+      val frames = currentFrames :+ Frame(nwBytes)
+      if (socket.hasReceiveMore) receiveBytes(socket.recv(0), frames) else frames
+    }
+
+    receiveBytes(socket.recv(0))
+  }
+
   def read[T](implicit deserializer: Deserializer[T], pool: FuturePool): ReadHandle[T]
 
   def handleConnectionOptions: OptionHandler = {
@@ -84,11 +110,11 @@ trait Client {
     case opt => log.warn("Skip unknown option: " + opt)
   }
   
-  def !(option: SocketOption) {
+  def setOption(option: SocketOption) {
     socketOps ! option    
   }
 
-  def !(options: Seq[SocketOption]) {
+  def setOptions(options: Seq[SocketOption]) {
     options foreach {socketOps ! _}
   }
 
@@ -145,9 +171,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
   private case object ReceiveFrames extends ClientLifecycle
   private case class PollError(ex: Throwable) extends ClientLifecycle
 
-  private val noBytes = Array[Byte]()
-
-  self ! options
+  self setOptions options
 
   private val pollTimeout = {
     val fromConfig = options collectFirst { case PollTimeoutDuration(duration) ⇒ duration }
@@ -177,16 +201,6 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
       } onFailure {
         case ex ⇒ actions ! PollError(ex)
       }).asInstanceOf[Promise[PollLifeCycle]]
-    }
-
-    def receiveFrames(): Seq[Frame] = {
-      @tailrec def receiveBytes(next: Array[Byte], currentFrames: Vector[Frame] = Vector.empty): Seq[Frame] = {
-        val nwBytes = if (next != null && next.nonEmpty) next else noBytes
-        val frames = currentFrames :+ Frame(nwBytes)
-        if (socket.hasReceiveMore) receiveBytes(socket.recv(0), frames) else frames
-      }
-
-      receiveBytes(socket.recv(0))
     }
 
     def recv(poll: Option[Promise[PollLifeCycle]]) {
