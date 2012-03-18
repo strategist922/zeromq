@@ -51,10 +51,7 @@ trait Client {
   }
 
   def recv[A](implicit reads: Reads[A]) = {
-    val frames = receiveFrames()
-    val str = new String(frames.head.payload.toArray)
-    log.info("FRAMED: " + frames + "; STR: " + str)
-    fromByteArray[A](frames.flatMap(_.payload).toArray)
+    fromByteArray[A](receiveFrames().flatMap(_.payload).toArray)
   }
 
   def ![T](obj: T)(implicit writes: Writes[T]) = send(obj)
