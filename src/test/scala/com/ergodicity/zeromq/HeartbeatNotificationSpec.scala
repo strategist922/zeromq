@@ -41,7 +41,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 
@@ -80,7 +80,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 
@@ -106,7 +106,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 
@@ -148,7 +148,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 
@@ -185,7 +185,7 @@ class HeartbeatNotificationSpec extends Spec {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 

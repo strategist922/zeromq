@@ -20,7 +20,7 @@ trait Client {
   type OptionHandler = PartialFunction[Any, Unit]
 
   def socket: Socket
-  
+
   def bind(bind: Bind) {
     setOption(bind)
   }
@@ -44,7 +44,7 @@ trait Client {
   def send[T](obj: T)(implicit writes: Writes[T]) {
     socket.send(toByteArray(obj), 0)
   }
-  
+
   def ask[Q, A](req: Q)(implicit writes: Writes[Q], reads: Reads[A]) = {
     send(req)
     recv[A]
@@ -53,14 +53,14 @@ trait Client {
   def recv[A](implicit reads: Reads[A]) = {
     val frames = receiveFrames()
     val str = new String(frames.head.payload.toArray)
-    log.info("FRAMED: "+frames+"; STR: "+str)
+    log.info("FRAMED: " + frames + "; STR: " + str)
     fromByteArray[A](frames.flatMap(_.payload).toArray)
   }
 
   def ![T](obj: T)(implicit writes: Writes[T]) = send(obj)
-  
+
   def ?[Q, A](obj: Q)(implicit writes: Writes[Q], reads: Reads[A]) = ask(obj)
-  
+
   protected def receiveFrames(): Seq[Frame] = {
     val noBytes = Array[Byte]()
 
@@ -98,13 +98,15 @@ trait Client {
   def handleUnknownOption: OptionHandler = {
     case opt => log.warn("Skip unknown option: " + opt)
   }
-  
+
   def setOption(option: SocketOption) {
-    (handleConnectionOptions orElse handleSubscribeOptions orElse handleUnknownOption) (option)
+    (handleConnectionOptions orElse handleSubscribeOptions orElse handleUnknownOption)(option)
   }
 
   def setOptions(options: Seq[SocketOption]) {
-    options foreach {setOption(_)}
+    options foreach {
+      setOption(_)
+    }
   }
 }
 
@@ -118,13 +120,18 @@ object Client {
 }
 
 private[zeromq] sealed trait PollLifeCycle
+
 private[zeromq] case object NoResults extends PollLifeCycle
+
 private[zeromq] case object Results extends PollLifeCycle
+
 private[zeromq] case object Closing extends PollLifeCycle
+
+case class ReadMessage[T](payload: T, ack: Offer[Unit])
 
 trait ReadHandle[T] {
 
-  val messages: Offer[T]
+  val messages: Offer[ReadMessage[T]]
 
   val error: Offer[Throwable]
 
@@ -134,12 +141,13 @@ trait ReadHandle[T] {
 object ReadHandle {
   // A convenience constructor using an offer for closing.
   def apply[T](
-             _messages: Offer[T],
-             _error: Offer[Throwable],
-             closeOf: Offer[Unit]
-             ): ReadHandle[T] = new ReadHandle[T] {
+                _messages: Offer[ReadMessage[T]],
+                _error: Offer[Throwable],
+                closeOf: Offer[Unit]
+                ): ReadHandle[T] = new ReadHandle[T] {
     val messages = _messages
     val error = _error
+
     def close() = closeOf()
   }
 }
@@ -147,24 +155,30 @@ object ReadHandle {
 
 object ClientClosedException extends Exception
 
-protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, options: Seq[SocketOption]) extends Client {self =>
+protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, options: Seq[SocketOption]) extends Client {
+  self =>
   type Receive = PartialFunction[Any, Unit]
 
   private sealed abstract class ClientLifecycle
+
   private case object Poll extends ClientLifecycle
+
   private case object ReceiveFrames extends ClientLifecycle
+
   private case class PollError(ex: Throwable) extends ClientLifecycle
 
   self setOptions options
 
   private val pollTimeout = {
-    val fromConfig = options collectFirst { case PollTimeoutDuration(duration) ⇒ duration }
+    val fromConfig = options collectFirst {
+      case PollTimeoutDuration(duration) ⇒ duration
+    }
     fromConfig getOrElse Client.DefaultPollDuration
   }
-  
+
   def read[T](implicit reads: Reads[T], pool: FuturePool) = {
     val error = new Broker[Throwable]
-    val messages = new Broker[T]
+    val messages = new Broker[ReadMessage[T]]
     val close = new Broker[Unit]
 
     val actions = new Broker[ClientLifecycle]
@@ -192,16 +206,30 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
 
       Offer.select(
         actions.recv {
+
           case Poll ⇒ {
             recv(None)
           }
+
           case ReceiveFrames ⇒ {
             receiveFrames() match {
-              case Seq() ⇒
-              case frames ⇒ messages ! fromByteArray[T](frames.flatMap(_.payload).toArray)
+              case Seq() ⇒ recv(None)
+              case frames ⇒
+                val ack = new Broker[Unit]
+                val payload = fromByteArray[T](frames.flatMap(_.payload).toArray)
+                messages ! ReadMessage(payload, ack.send())
+
+                Offer.select(
+                  ack.recv {_ => recv(None)},
+                  close.recv {_ =>
+                      currentPoll.cancel()
+                      error ! ClientClosedException
+                      poller.unregister(socket)
+                  }
+                )
             }
-            recv(None)
           }
+
           case PollError(ex) ⇒ {
             log.error("There was a problem polling the zeromq socket", ex)
             error ! ex
@@ -209,10 +237,10 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
           }
         },
 
-        close.recv { _ =>
-          currentPoll.cancel()
-          error ! ClientClosedException
-          poller.unregister(socket)
+        close.recv {_ =>
+            currentPoll.cancel()
+            error ! ClientClosedException
+            poller.unregister(socket)
         }
       )
     }

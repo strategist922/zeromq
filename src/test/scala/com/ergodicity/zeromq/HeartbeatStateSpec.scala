@@ -52,7 +52,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       val pingReceived = new CountDownLatch(1)
       val pingHandle = ping.read[Ping]
       pingHandle.messages() foreach {
-        case Ping(u) if (u == uuid) => pingReceived.countDown();
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pingReceived.countDown(); ack()
         case _ =>
       }
 
@@ -81,7 +81,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 
@@ -119,7 +119,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
 
       val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
+        case ReadMessage(Ping(u), ack) if (u == uuid) => pong.send(Pong(uuid, identifier)); ack()
         case _ =>
       }
 

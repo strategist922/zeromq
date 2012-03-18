@@ -109,7 +109,8 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
   // -- Handle Pong messages
   val pongHandle = pong.read[Pong]
   pongHandle.messages foreach {
-    pong: Pong =>
+    msg =>
+      val pong = msg.payload
       val uid = pong.uid
       val identifier = pong.identifier
 
@@ -139,6 +140,7 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
           // Forward Pong to broker
           tuple._2 ! pong
       }
+      msg.ack()
   }
 
   pongHandle.error foreach {
@@ -206,8 +208,11 @@ class Patient(ref: HeartbeatRef, identifier: Identifier)
   val pong = Client(XReq, options = Connect(ref.pong) :: Nil)
 
   val pingHandle = ping.read[Ping]
-  pingHandle.messages foreach {ping: Ping =>
-    pong.send(Pong(ping.uid, identifier))
+  pingHandle.messages foreach {
+    msg =>
+      val ping = msg.payload
+      pong.send(Pong(ping.uid, identifier))
+      msg.ack()
   }
 
   def close() {

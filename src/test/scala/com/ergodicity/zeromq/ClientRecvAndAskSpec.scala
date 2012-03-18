@@ -44,7 +44,7 @@ class ClientRecvAndAskSpec extends Spec {
 
       val handle = server.read[String]
       handle.messages foreach {
-        case "Hello" => server.send("Hello World")
+        case ReadMessage("Hello", ack) => server.send("Hello World"); ack()
         case _ =>
       }
 

@@ -33,6 +33,7 @@ class ClientReadHandleSpec extends Spec with MustMatchers {
       readHandle.messages foreach {m =>
         readNbr += 1
         if (readNbr == expectedMessages) latch.countDown()
+        m.ack()
       }
 
       @volatile var closed = false

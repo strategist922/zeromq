@@ -36,7 +36,7 @@ class PatientSpec extends Spec {
       val latch = new CountDownLatch(1)
       val handle = pong.read[Pong]
       handle.messages foreach {
-        case Pong(u, i) if (u == uuid && i == identifier) => latch.countDown()
+        case ReadMessage(Pong(u, i), ack) if (u == uuid && i == identifier) => latch.countDown(); ack()
         case _ =>
       }
 
