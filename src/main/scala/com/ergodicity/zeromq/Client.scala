@@ -8,7 +8,8 @@ import com.twitter.conversions.time._
 import org.zeromq.ZMQ
 import annotation.tailrec
 import com.twitter.util._
-import com.ergodicity.zeromq.Frame._
+import sbinary._
+import Operations._
 
 /**
  * Friendly ZMQ queue client
@@ -20,58 +21,46 @@ trait Client {
 
   def socket: Socket
   
-  private val socketOps = new Broker[SocketOption]
-
   def bind(bind: Bind) {
-    socketOps ! bind
+    setOption(bind)
   }
 
   def connect(connect: Connect) {
-    socketOps ! connect
+    setOption(connect)
   }
 
   def subscribe(sub: Subscribe) {
-    socketOps ! sub
+    setOption(sub)
   }
 
   def unsubscribe(sub: Unsubscribe) {
-    socketOps ! sub
+    setOption(sub)
   }
 
   def close() {
     socket.close()
   }
 
-  def send[T](obj: T)(implicit serializer: Serializer[T]) {
-
-    @tailrec def sendFrames(frames: Seq[Frame]) {
-      frames match {
-        case Nil =>
-          socket.send(Array[Byte](), 0)
-        case x :: Nil =>
-          socket.send(x.payload.toArray, 0)
-        case x :: xs =>
-          socket.send(x.payload.toArray, ZMQ.SNDMORE)
-          sendFrames(xs)
-      }
-    }
-
-    sendFrames(serializer(obj))
+  def send[T](obj: T)(implicit writes: Writes[T]) {
+    socket.send(toByteArray(obj), 0)
   }
-
-  def ask[T](obj: T)(implicit serializer: Serializer[T], deserializer: Deserializer[T]) = {
-    send(obj)
-    recv[T]
-  }
-
-  def recv[T](implicit deserializer: Deserializer[T]) = {
-    deserializer(receiveFrames())
-  }
-
-  def ![T](obj: T)(implicit serializer: Serializer[T]) = send(obj)
   
-  def ?[T](obj: T)(implicit serializer: Serializer[T], deserializer: Deserializer[T]) = ask(obj)
+  def ask[Q, A](req: Q)(implicit writes: Writes[Q], reads: Reads[A]) = {
+    send(req)
+    recv[A]
+  }
 
+  def recv[A](implicit reads: Reads[A]) = {
+    val frames = receiveFrames()
+    val str = new String(frames.head.payload.toArray)
+    log.info("FRAMED: "+frames+"; STR: "+str)
+    fromByteArray[A](frames.flatMap(_.payload).toArray)
+  }
+
+  def ![T](obj: T)(implicit writes: Writes[T]) = send(obj)
+  
+  def ?[Q, A](obj: Q)(implicit writes: Writes[Q], reads: Reads[A]) = ask(obj)
+  
   protected def receiveFrames(): Seq[Frame] = {
     val noBytes = Array[Byte]()
 
@@ -84,7 +73,7 @@ trait Client {
     receiveBytes(socket.recv(0))
   }
 
-  def read[T](implicit deserializer: Deserializer[T], pool: FuturePool): ReadHandle[T]
+  def read[T](implicit reads: Reads[T], pool: FuturePool): ReadHandle[T]
 
   def handleConnectionOptions: OptionHandler = {
     case Bind(endpoint) =>
@@ -111,20 +100,16 @@ trait Client {
   }
   
   def setOption(option: SocketOption) {
-    socketOps ! option    
+    (handleConnectionOptions orElse handleSubscribeOptions orElse handleUnknownOption) (option)
   }
 
   def setOptions(options: Seq[SocketOption]) {
-    options foreach {socketOps ! _}
-  }
-
-  socketOps.recv foreach {
-    handleConnectionOptions orElse handleSubscribeOptions orElse handleUnknownOption
+    options foreach {setOption(_)}
   }
 }
 
 object Client {
-  val DefaultPollDuration = 1000.millis
+  val DefaultPollDuration = 25000.millis
 
   def apply(t: ZMQSocketType, options: Seq[SocketOption] = Seq())(implicit ctx: Context) = {
     val socket = ctx.socket(t.id)
@@ -155,7 +140,6 @@ object ReadHandle {
              ): ReadHandle[T] = new ReadHandle[T] {
     val messages = _messages
     val error = _error
-
     def close() = closeOf()
   }
 }
@@ -178,7 +162,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
     fromConfig getOrElse Client.DefaultPollDuration
   }
   
-  def read[T](implicit deserializer: Deserializer[T], pool: FuturePool) = {
+  def read[T](implicit reads: Reads[T], pool: FuturePool) = {
     val error = new Broker[Throwable]
     val messages = new Broker[T]
     val close = new Broker[Unit]
@@ -214,7 +198,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
           case ReceiveFrames ⇒ {
             receiveFrames() match {
               case Seq() ⇒
-              case frames ⇒ messages ! deserializer(frames)
+              case frames ⇒ messages ! fromByteArray[T](frames.flatMap(_.payload).toArray)
             }
             recv(None)
           }

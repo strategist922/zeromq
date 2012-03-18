@@ -15,11 +15,8 @@ import org.zeromq.ZMQ.Context
 
 case class Identifier(id: String)
 
-protected sealed trait Message
-
-protected case class Ping(uid: UUID) extends Message
-
-protected case class Pong(uid: UUID, identifier: Identifier) extends Message
+protected case class Ping(uid: UUID)
+protected case class Pong(uid: UUID, identifier: Identifier)
 
 object HeartbeatProtocol extends DefaultProtocol {
 
@@ -47,34 +44,20 @@ object HeartbeatProtocol extends DefaultProtocol {
     }
   }
 
-  implicit object HeartbeatFormat extends Format[Message] {
-    def reads(in: Input) = read[Byte](in) match {
-      case 0 => Ping(read[UUID](in))
-      case 1 => Pong(read[UUID](in), read[Identifier](in))
-      case _ => throw new RuntimeException("Unsupported Heartbeat message")
-    }
+  implicit object PingFormat extends Format[Ping] {
+    def reads(in: Input) = Ping(read[UUID](in))
 
-    def writes(out: Output, heartbeat: Message) = heartbeat match {
-      case Ping(uid) =>
-        write[Byte](out, 0)
-        write[UUID](out, uid)
-      case Pong(uid, identifier) =>
-        write[Byte](out, 1)
-        write[UUID](out, uid)
-        write[Identifier](out, identifier)
+    def writes(out: Output, value: Ping) {
+      write[UUID](out, value.uid)
     }
   }
 
-  implicit def HeartbeatSerializer = new Serializer[Message] {
-    def apply(obj: Message) = Seq(Frame(toByteArray(obj)))
-  }
+  implicit object PongFormat extends Format[Pong] {
+    def reads(in: Input) = Pong(read[UUID](in), read[Identifier](in))
 
-  implicit def HeartbeatDeserializer = new Deserializer[Message] {
-    def apply(frames: Seq[Frame]) = {
-      frames.toList match {
-        case x :: Nil => fromByteArray[Message](x.payload.toArray)
-        case seq => throw new IllegalArgumentException("Illegal frames sequence: "+seq)
-      }
+    def writes(out: Output, value: Pong) {
+      write[UUID](out, value.uid)
+      write[Identifier](out, value.identifier)
     }
   }
 }
@@ -111,12 +94,11 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
   private val pong = Client(XReq, options = Bind(ref.pong) :: Nil)
 
   def ping(uuid: UUID): Offer[Pong] = {
-    log.info("PING: " + uuid)
     val broker = new Broker[Pong]()
     atomic {implicit txn =>
         pendingUUID.transform(l => ((uuid, broker) :: l).slice(0, lossLimit))
     }
-    ping.send[Message](Ping(uuid))
+    ping.send(Ping(uuid))
     broker.recv
   }
 
@@ -125,9 +107,12 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
   }
 
   // -- Handle Pong messages
-  val pongHandle = pong.read[Message]
+  val pongHandle = pong.read[Pong]
   pongHandle.messages foreach {
-    case pong@Pong(uid, identifier) =>
+    pong: Pong =>
+      val uid = pong.uid
+      val identifier = pong.identifier
+
       pendingUUID.single() find (_._1 == uid) foreach {
         tuple => // only if UUID presented
           val notification = atomic {
@@ -154,10 +139,6 @@ class Heartbeat(ref: HeartbeatRef, duration: Duration = 1.second, lossLimit: Int
           // Forward Pong to broker
           tuple._2 ! pong
       }
-      log.info("PATIENTS: " + patients.single())
-      log.info("PendingPingUUID: " + pendingUUID.single())
-
-    case err => log.warn("Expected Pong message; Got: " + err)
   }
 
   pongHandle.error foreach {
@@ -224,10 +205,9 @@ class Patient(ref: HeartbeatRef, identifier: Identifier)
   val ping = Client(Sub, options = Connect(ref.ping) :: Subscribe.all :: Nil)
   val pong = Client(XReq, options = Connect(ref.pong) :: Nil)
 
-  val pingHandle = ping.read[Message]
-  pingHandle.messages foreach {
-    case Ping(u) => pong.send[Message](Pong(u, identifier))
-    case _ =>
+  val pingHandle = ping.read[Ping]
+  pingHandle.messages foreach {ping: Ping =>
+    pong.send(Pong(ping.uid, identifier))
   }
 
   def close() {

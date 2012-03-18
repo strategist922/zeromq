@@ -23,10 +23,11 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
     implicit val pool = FuturePool(Executors.newCachedThreadPool())
     val identifier = Identifier("TestId")
 
-    implicit val context = ZMQ.context(1)
     val ref = HeartbeatRef(PingEndpoint, PongEndpoint)
 
     it("should return None for no Pong response") {
+      implicit val context = ZMQ.context(1)
+
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
 
       assert(server.getState(identifier) match {
@@ -35,9 +36,12 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       })
 
       server.stop()
+      context.term()
     }
 
     it("should send Ping requests with given UUID") {
+      implicit val context = ZMQ.context(1)
+
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
@@ -46,9 +50,9 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       server.ping(uuid)
 
       val pingReceived = new CountDownLatch(1)
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages() foreach {
-        case Ping(u) => if (u == uuid) pingReceived.countDown();
+        case Ping(u) if (u == uuid) => pingReceived.countDown();
         case _ =>
       }
 
@@ -57,9 +61,11 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       pingHandle.close()
       ping.close()
       server.stop()
+      context.term()
     }
 
     it("should return Alive for valid Pong response") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
@@ -73,9 +79,9 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
         pongReceived.countDown()
       }
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -94,9 +100,11 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       server.stop()
       ping.close()
       pong.close();
+      context.term()
     }
 
     it("should become Alive -> Dead -> WalkingDead") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
@@ -109,9 +117,9 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
         pongReceived.countDown()
       }
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -152,8 +160,8 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       server.stop()
       ping.close()
       pong.close();
+      context.term()
     }
-
   }
 
 }

@@ -30,16 +30,13 @@ class PatientSpec extends Spec {
 
       val uuid = UUID.randomUUID()
       // Send Ping
-      ping.send[Message](Ping(uuid))
+      ping.send(Ping(uuid))
 
       // Read Pongs
       val latch = new CountDownLatch(1)
-      val handle = pong.read[Message]
+      val handle = pong.read[Pong]
       handle.messages foreach {
-        case pong@Pong(u, i) => {
-          log.info("Pong: " + pong)
-          if (u == uuid && i == identifier) latch.countDown()
-        }
+        case Pong(u, i) if (u == uuid && i == identifier) => latch.countDown()
         case _ =>
       }
 

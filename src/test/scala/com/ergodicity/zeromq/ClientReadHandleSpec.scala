@@ -4,29 +4,29 @@ import org.scalatest.Spec
 import org.zeromq.ZMQ
 import org.slf4j.LoggerFactory
 import com.twitter.util.FuturePool
-import com.twitter.conversions.time._
 import org.scalatest.matchers.MustMatchers
 import SocketType._
 import java.util.concurrent.{CountDownLatch, TimeUnit, Executors}
+import HeartbeatProtocol._
 
 class ClientReadHandleSpec extends Spec with MustMatchers {
   val log = LoggerFactory.getLogger(classOf[ClientReadHandleSpec])
 
-  describe("ZMQ Client ReadHandle") {
-    val endpoint = "inproc://readhandle-spec"
-    implicit val pool = FuturePool(Executors.newSingleThreadExecutor())
+  val endpoint = "inproc://ClientReadHandleSpec"
+  implicit val pool = FuturePool(Executors.newSingleThreadExecutor())
 
+  describe("ZMQ Client ReadHandle") {
     it("should read messages from PUB/SUB socket") {
       implicit val context = ZMQ.context(1)
 
       val pub = Client(Pub, options = Bind(endpoint) :: Nil)
-      val client = Client(Sub, options = Connect(endpoint) :: Subscribe.all :: PollTimeoutDuration(250.milliseconds) :: Nil)
+      val sub = Client(Sub, options = Connect(endpoint) :: Subscribe.all :: Nil)
 
-      val expectedMessages = 1000
-      for (i <- 1 to expectedMessages) pub.send("Message#"+i)
+      val start = System.currentTimeMillis()
+      val expectedMessages = 100
+      for (i <- 1 to expectedMessages) pub.send(i)
 
-      val readHandle = client.read[ZMQMessage]
-
+      val readHandle = sub.read[Int]
       val latch = new CountDownLatch(1)
 
       var readNbr = 0
@@ -42,8 +42,12 @@ class ClientReadHandleSpec extends Spec with MustMatchers {
       }
 
       latch.await(5, TimeUnit.SECONDS)
-      readHandle.close()
+      val end = System.currentTimeMillis()
+
+      log.info("Time: " + (end - start) + " millis")
       pub.close()
+      readHandle.close()
+      sub.close()
 
       // -- Assert all messages received and client closed
       log.info("Messages readed: " + readNbr)

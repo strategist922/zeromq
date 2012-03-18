@@ -4,9 +4,9 @@ import org.scalatest.Spec
 import org.slf4j.LoggerFactory
 import com.ergodicity.zeromq.SocketType._
 import org.zeromq.ZMQ
-import Deserializer._
 import com.twitter.util.FuturePool
 import java.util.concurrent.Executors
+import sbinary.DefaultProtocol._
 
 class ClientRecvAndAskSpec extends Spec {
   val log = LoggerFactory.getLogger(classOf[ClientRecvAndAskSpec])
@@ -21,14 +21,13 @@ class ClientRecvAndAskSpec extends Spec {
 
       val server = Client(Rep, options = Bind(Endpoint) :: Nil)
       val client = Client(Req, options = Connect(Endpoint) :: Nil)
-      
+
       client.send(message)
-      
+
       val received = server.recv[String]
-      
-      log.info("Received: "+received)
+      log.info("Received: " + received)
       assert(received == message)
-      
+
       server.close()
       client.close()
       context.term()
@@ -41,14 +40,18 @@ class ClientRecvAndAskSpec extends Spec {
       val message = "Hello"
 
       val server = Client(Rep, options = Bind(Endpoint) :: Nil)
+      val client = Client(Req, options = Connect(Endpoint) :: Nil)
+
       val handle = server.read[String]
       handle.messages foreach {
         case "Hello" => server.send("Hello World")
         case _ =>
       }
-      val client = Client(Req, options = Connect(Endpoint) :: Nil)
 
-      val reply = client ? message
+      // Let clients to connect
+      Thread.sleep(10)
+
+      val reply = client.ask[String, String](message)
       log.info("Reply: " + reply)
       assert(reply == "Hello World")
 

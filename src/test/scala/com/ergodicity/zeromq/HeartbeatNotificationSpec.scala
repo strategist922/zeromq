@@ -13,22 +13,20 @@ import com.twitter.util.{Return, FuturePool}
 class HeartbeatNotificationSpec extends Spec {
   val log = LoggerFactory.getLogger(classOf[HeartbeatNotificationSpec])
 
+  val PingEndpoint = "inproc://ping"
+  val PongEndpoint = "inproc://pong"
+
+  val duration = 500.milliseconds
+
+  implicit val pool = FuturePool(Executors.newCachedThreadPool())
+
+  val identifier = Identifier("TestId")
+  val ref = HeartbeatRef(PingEndpoint, PongEndpoint)
+
   describe("Heartbeat Notifications") {
 
-
-    val PingEndpoint = "inproc://ping"
-    val PongEndpoint = "inproc://pong"
-
-    val duration = 250.milliseconds
-
-    implicit val pool = FuturePool(Executors.newCachedThreadPool())
-    val identifier = Identifier("TestId")
-
-    val ref = HeartbeatRef(PingEndpoint, PongEndpoint)
-
-    implicit val context = ZMQ.context(1)
-
     it("Should send 'Connected' notification instantly when patient already Alive") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
@@ -41,9 +39,9 @@ class HeartbeatNotificationSpec extends Spec {
         case Pong(u, i) if u == uuid && i == identifier => pongReceived.countDown()
       }
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -61,9 +59,11 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
+      context.term()
     }
 
     it("Should send 'Connected' notification after became alive") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 10)
@@ -78,9 +78,9 @@ class HeartbeatNotificationSpec extends Spec {
 
       server.ping(uuid)
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -91,9 +91,11 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
+      context.term()
     }
 
     it("Should send 'Lost' notification instantly when patient already Dead") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
@@ -102,9 +104,9 @@ class HeartbeatNotificationSpec extends Spec {
 
       server.ping(uuid)
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -123,9 +125,11 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
+      context.term()
     }
 
     it("Should send 'Connected' and 'Lost' notifications") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
@@ -142,9 +146,9 @@ class HeartbeatNotificationSpec extends Spec {
 
       server.ping(uuid)
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -156,9 +160,11 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
+      context.term()
     }
 
     it("Should send only one unique notification for walking deads") {
+      implicit val context = ZMQ.context(1)
       val uuid = UUID.randomUUID()
 
       val server = new Heartbeat(ref, duration = duration, lossLimit = 1)
@@ -177,9 +183,9 @@ class HeartbeatNotificationSpec extends Spec {
 
       server.ping(uuid)
 
-      val pingHandle = ping.read[Message]
+      val pingHandle = ping.read[Ping]
       pingHandle.messages foreach {
-        case Ping(u) => if (u == uuid) pong.send[Message](Pong(uuid, identifier))
+        case Ping(u) if (u == uuid) => pong.send(Pong(uuid, identifier))
         case _ =>
       }
 
@@ -210,6 +216,7 @@ class HeartbeatNotificationSpec extends Spec {
       ping.close()
       pong.close();
       server.stop()
+      context.term()
     }
   }
 }
