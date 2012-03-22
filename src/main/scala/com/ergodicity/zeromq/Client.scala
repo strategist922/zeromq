@@ -41,22 +41,38 @@ trait Client {
     socket.close()
   }
 
-  def send[T](obj: T)(implicit writes: Writes[T]) {
-    socket.send(toByteArray(obj), 0)
+  def send[T](obj: T)(implicit serializer: Serializer[T]) {
+    @tailrec def sendFrames(frames: Seq[Frame]) {
+      frames match {
+        case Nil =>
+          socket.send(Array[Byte](), 0)
+        case x :: Nil =>
+          socket.send(x.payload.toArray, 0)
+        case x :: xs =>
+          socket.send(x.payload.toArray, ZMQ.SNDMORE)
+          sendFrames(xs)
+      }
+    }
+
+    sendFrames(serializer(obj))
   }
 
-  def ask[Q, A](req: Q)(implicit writes: Writes[Q], reads: Reads[A]) = {
+  def ask[Q, A](req: Q)(implicit serializer: Serializer[Q], deserializer: Deserializer[A]) = {
     send(req)
     recv[A]
   }
 
-  def recv[A](implicit reads: Reads[A]) = {
-    fromByteArray[A](receiveFrames().flatMap(_.payload).toArray)
+  def recv[A](implicit deserializer: Deserializer[A]) = {
+    deserializer(receiveFrames())
   }
 
-  def ![T](obj: T)(implicit writes: Writes[T]) = send(obj)
+  def ![T](obj: T)(implicit serializer: Serializer[T]) = send(obj)
 
-  def ?[Q, A](obj: Q)(implicit writes: Writes[Q], reads: Reads[A]) = ask(obj)
+  def ?[Q, A](obj: Q)(implicit serializer: Serializer[Q], deserializer: Deserializer[A]) = ask(obj)
+
+  protected def sendFrames(frames: Seq[Frame]) {
+
+  }
 
   protected def receiveFrames(): Seq[Frame] = {
     val noBytes = Array[Byte]()
@@ -70,7 +86,7 @@ trait Client {
     receiveBytes(socket.recv(0))
   }
 
-  def read[T](implicit reads: Reads[T], pool: FuturePool): ReadHandle[T]
+  def read[T](implicit deserializer: Deserializer[T], pool: FuturePool): ReadHandle[T]
 
   def handleConnectionOptions: OptionHandler = {
     case Bind(endpoint) =>
@@ -173,7 +189,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
     fromConfig getOrElse Client.DefaultPollDuration
   }
 
-  def read[T](implicit reads: Reads[T], pool: FuturePool) = {
+  def read[T](implicit deserializer: Deserializer[T], pool: FuturePool) = {
     val error = new Broker[Throwable]
     val messages = new Broker[ReadMessage[T]]
     val close = new Broker[Unit]
@@ -213,7 +229,7 @@ protected[zeromq] class ConnectedClient(val socket: Socket, context: Context, op
               case Seq() ⇒ recv(None)
               case frames ⇒
                 val ack = new Broker[Unit]
-                val payload = fromByteArray[T](frames.flatMap(_.payload).toArray)
+                val payload = deserializer(frames)
                 messages ! ReadMessage(payload, ack.send())
 
                 Offer.select(
