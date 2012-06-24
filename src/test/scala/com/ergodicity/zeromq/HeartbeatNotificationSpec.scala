@@ -16,7 +16,7 @@ class HeartbeatNotificationSpec extends Spec {
   val PingEndpoint = "inproc://ping"
   val PongEndpoint = "inproc://pong"
 
-  val duration = 500.milliseconds
+  val duration = 300.milliseconds
 
   implicit val pool = FuturePool(Executors.newCachedThreadPool())
 
@@ -59,7 +59,7 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
-      context.term()
+      
     }
 
     it("Should send 'Connected' notification after became alive") {
@@ -91,7 +91,7 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
-      context.term()
+      
     }
 
     it("Should send 'Lost' notification instantly when patient already Dead") {
@@ -125,7 +125,7 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
-      context.term()
+      
     }
 
     it("Should send 'Connected' and 'Lost' notifications") {
@@ -160,7 +160,7 @@ class HeartbeatNotificationSpec extends Spec {
       server.stop()
       ping.close()
       pong.close();
-      context.term()
+      
     }
 
     it("Should send only one unique notification for walking deads") {
@@ -216,7 +216,7 @@ class HeartbeatNotificationSpec extends Spec {
       ping.close()
       pong.close();
       server.stop()
-      context.term()
+            
     }
   }
 }

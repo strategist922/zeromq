@@ -36,7 +36,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       })
 
       server.stop()
-      context.term()
+      
     }
 
     it("should send Ping requests with given UUID") {
@@ -61,7 +61,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       pingHandle.close()
       ping.close()
       server.stop()
-      context.term()
+      
     }
 
     it("should return Alive for valid Pong response") {
@@ -100,7 +100,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       server.stop()
       ping.close()
       pong.close();
-      context.term()
+      
     }
 
     it("should become Alive -> Dead -> WalkingDead") {
@@ -160,7 +160,7 @@ class HeartbeatStateSpec extends Spec with BeforeAndAfter {
       server.stop()
       ping.close()
       pong.close();
-      context.term()
+      
     }
   }
 
