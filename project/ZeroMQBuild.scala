@@ -51,10 +51,12 @@ object Dependency {
     val ScalaSTM     = "0.4"
     val JodaTime     = "2.0"
     val JodaConvert  = "1.2"
-    val Finagle      = "1.11.1"
     val SBinary      = "0.4.0"
     val ScalaTime    = "0.5"
-    val Ostrich      = "4.10.6"
+
+    // Twitter dependencies
+    val Finagle      = "4.0.2"
+    val Ostrich      = "7.0.0"
   }
 
   // Compile
