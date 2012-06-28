@@ -71,7 +71,7 @@ object Dependency {
   val finagleKestrel    = "com.twitter"                      %% "finagle-kestrel"        % V.Finagle
   val ostrich           = "com.twitter"                      %% "ostrich"                % V.Ostrich
   val sbinary           = "org.scala-tools.sbinary"          %% "sbinary"                % V.SBinary
-  val scalaTime         = "org.scala-tools.time"             %% "time"                   % V.ScalaTime
+  val scalaTime         = "org.scala-tools.time"             %% "time"                   % V.ScalaTime  intransitive()
 
   // Provided
 
