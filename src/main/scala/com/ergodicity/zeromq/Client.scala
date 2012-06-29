@@ -8,8 +8,6 @@ import com.twitter.conversions.time._
 import org.zeromq.ZMQ
 import annotation.tailrec
 import com.twitter.util._
-import sbinary._
-import Operations._
 
 /**
  * Friendly ZMQ queue client
@@ -144,9 +142,9 @@ case class ReadMessage[T](payload: T, ack: Offer[Unit])
 
 trait ReadHandle[T] {
 
-  val messages: Offer[ReadMessage[T]]
+  def messages: Offer[ReadMessage[T]]
 
-  val error: Offer[Throwable]
+  def error: Offer[Throwable]
 
   def close()
 }
